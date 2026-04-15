@@ -1,0 +1,42 @@
+# --- System & Credentials ---
+.env
+.DS_Store
+Thumbs.db
+
+# --- Airflow ---
+logs/
+plugins/
+config/
+airflow.db
+*.pid
+# Allow git to track .gitkeep to maintain folder structure in the repo
+!logs/.gitkeep
+!plugins/.gitkeep
+!config/.gitkeep
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Data Lake (Medallion Layers) ---
+# Ignore all data files in the medallion layers
+datalake/bronze/*
+datalake/silver/*
+datalake/gold/*
+
+# Allow tracking of .gitkeep files so the folders appear on GitHub
+!datalake/bronze/.gitkeep
+!datalake/silver/.gitkeep
+!datalake/gold/.gitkeep
+
+# --- Python & PySpark ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# --- VS Code ---
+.vscode/
