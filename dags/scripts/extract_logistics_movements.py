@@ -9,7 +9,6 @@ def extract_logistics_movements():
         raise ValueError("EIA_API_KEY is missing!")
 
     url = "https://api.eia.gov/v2/petroleum/move/neti/data/"
-    
     params = {
         "api_key": API_KEY,
         "frequency": "monthly",
