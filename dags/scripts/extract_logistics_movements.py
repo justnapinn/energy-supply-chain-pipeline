@@ -2,9 +2,10 @@ import requests
 import json
 import os
 from datetime import datetime
+from airflow.models import Variable
 
 def extract_logistics_movements():
-    API_KEY = os.getenv("EIA_API_KEY")
+    API_KEY = Variable.get("EIA_API_KEY")
     if not API_KEY:
         raise ValueError("EIA_API_KEY is missing!")
 
