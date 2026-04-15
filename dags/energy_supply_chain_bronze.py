@@ -1,6 +1,7 @@
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from datetime import datetime, timedelta
 import sys
 import os
@@ -23,7 +24,7 @@ default_args = {
 }
 
 with DAG(
-    'energy_supply_chain_pipeline',
+    'energy_supply_chain_bronze',
     default_args=default_args,
     schedule='@weekly',
     catchup=False,
@@ -51,9 +52,15 @@ with DAG(
         python_callable=extract_logistics_movements.extract_logistics_movements,
     )
 
+    trigger_silver_layer = TriggerDagRunOperator(
+        task_id='trigger_silver_layer',
+        trigger_dag_id='energy_supply_chain_silver', # Silver DAG Name
+        wait_for_completion=False 
+    )
+
     # 3. End Task
     end_task = EmptyOperator(
         task_id='end_task'
     )
 
-    start_task >> [task_extract_prices, task_extract_supply, task_extract_movements] >> end_task
+    start_task >> [task_extract_prices, task_extract_supply, task_extract_movements] >> trigger_silver_layer >> end_task

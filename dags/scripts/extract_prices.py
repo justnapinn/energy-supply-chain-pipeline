@@ -25,6 +25,8 @@ def extract_petroleum_prices():
     file_name = f"prices_{datetime.now().strftime('%Y%m%d')}.json"
     save_path = os.path.join("/opt/airflow/datalake/bronze", file_name)
     
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
     with open(save_path, 'w') as f:
         json.dump(response.json(), f)
         
