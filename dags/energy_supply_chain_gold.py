@@ -25,6 +25,11 @@ with DAG(
         bash_command='python /opt/airflow/dags/scripts/spark/gold_analytics.py',
     )
 
+    load_to_postgres = BashOperator(
+        task_id='load_gold_to_postgres',
+        bash_command='python /opt/airflow/dags/scripts/spark/gold_to_postgres.py',
+    )
+
     end_task = EmptyOperator(task_id='end_gold_layer')
 
-    start_task >> build_analytics >> end_task
+    start_task >> build_analytics >> load_to_postgres >> end_task
