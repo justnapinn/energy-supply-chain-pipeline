@@ -2,9 +2,10 @@ import requests
 import json
 import os
 from datetime import datetime
+from airflow.models import Variable
 
 def extract_supply_estimates():
-    API_KEY = os.getenv("EIA_API_KEY")
+    API_KEY = Variable.get("EIA_API_KEY")
     if not API_KEY:
         raise ValueError("EIA_API_KEY is missing!")
 
@@ -15,7 +16,8 @@ def extract_supply_estimates():
         "data[0]": "value",
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
-        "length": 100 # extract 100 weeks of data then filter in silver layer
+        "offset": 0,
+        "length": 5000 
     }
 
     response = requests.get(url, params=params)
