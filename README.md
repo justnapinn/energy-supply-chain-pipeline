@@ -1,1 +1,221 @@
-# energy-supply-chain-pipeline
+# Macro-Energy Supply Chain & Logistics Analytics Pipeline
+
+## 📌 Project Overview
+This project is an end-to-end Data Engineering pipeline designed to integrate and analyze macro-level energy supply chain data and logistics costs. By leveraging the **U.S. Energy Information Administration (EIA) API v2**, the pipeline orchestrates the flow of global energy metrics to provide insights into the relationship between transportation costs (Diesel prices) and energy inventory stability.
+
+The core objective is to build a robust **Batch Processing Pipeline** that handles multi-frequency data—integrating weekly price and supply metrics with monthly logistics movement data—to create a unified view of the energy supply chain.
+
+### Key Features
+* **Automated Ingestion:** Daily/Weekly/Monthly batch ingestion via REST API.
+* **Medallion Architecture:** Data transformation through Bronze, Silver, and Gold layers.
+* **Multi-frequency Integration:** Advanced data resampling to align Weekly and Monthly time-series data.
+* **Orchestration:** Managed workflow using **Apache Airflow** running in a containerized environment.
+
+## 🏗️ Architecture Diagram
+The high-level data flow follows a **Batch Processing** model, orchestrated by **Apache Airflow**. It is implemented using a **Medallion Architecture** (Bronze, Silver, Gold layers) within a containerized environment (Docker Compose).
+
+The workflow can be summarized as follows:
+1.  **Ingestion (Airflow DAG):** Python scripts pull JSON data from **EIA API v2**.
+2.  **Raw Zone (Bronze):** Raw JSON responses are stored as files, partitioned by date.
+3.  **Processed Zone (Silver):** Data is cleaned, typed, "unpivoted" into Long Format, and weekly data is **resampled to a monthly grain**.
+4.  **Curated Zone (Gold):** Cleaned Price, Supply, and Monthly Movement data are **JOINED** to create a unified **Star Schema**.
+5.  **Serving:** The curated dataset is made available for analysis and visualization (e.g., via Power BI).
+
+---
+> **PLACEHOLDER for Diagram Image**
+> *In your final repo, create an image of your architecture and link it here.*
+>
+> `![Energy Supply Chain Architecture](path/to/your/architecture_diagram.png)`
+---
+
+## 🛠️ Data Sources & Tech Stack
+
+### 📊 Data Sources (EIA API v2)
+The pipeline ingests data from three primary routes within the U.S. Energy Information Administration (EIA) open data portal:
+* **Petroleum Prices:** Weekly retail gasoline and diesel prices (`petroleum/pri/gnd`). Focuses on PADD 1-5 to track logistics cost factors.
+* **Supply Estimates:** Weekly estimates of production and stocks (`petroleum/sum/sndw`). Tracks inventory levels of crude oil and finished products.
+* **Logistics Movements:** Monthly movements by pipeline, tanker, barge, and rail (`petroleum/move/rcv`). Captures the flow of energy across the supply chain.
+
+### 💻 Tech Stack
+* **Orchestration:** [Apache Airflow](https://airflow.apache.org/) - Managing task dependencies, scheduling, and monitoring.
+* **Containerization:** [Docker](https://www.docker.com/) & **Docker Compose** - Ensuring environment consistency across development and production.
+* **Language:** [Python](https://www.python.org/) - Primary language for API ingestion and data logic.
+* **Data Processing:** [Pandas](https://pandas.pydata.org/) - For data cleansing, unpivoting (Wide to Long), and time-series resampling.
+* **Storage:** **Local File System / Cloud Storage** - Implementing a Medallion Architecture (Bronze, Silver, Gold folders).
+* **Database (Optional):** [PostgreSQL](https://www.postgresql.org/) - For serving the final Gold layer to BI tools.
+
+## 📂 Project Structure
+The repository is organized to support a scalable Data Engineering workflow. It implements a **Simulated Data Lake** using the **Medallion Architecture** to ensure data integrity and traceability.
+
+```text
+energy-supply-chain-pipeline/
+├── dags/                        # Airflow Directed Acyclic Graphs (DAGs)
+│   ├── energy_supply_chain.py    # Main DAG file (Orchestration logic)
+│   └── scripts/                 # Task-level logic (1 Task = 1 Script/Operator)
+│       ├── extract_prices.py     # Task: Extract Price data from API
+│       ├── extract_supply.py     # Task: Extract Supply data from API
+│       ├── extract_movements.py  # Task: Extract Movement data from API
+│       ├── transform_silver.py   # Task: Clean, Unpivot, and Resample data
+│       └── transform_gold.py     # Task: Join datasets into Star Schema
+├── datalake/                    # Simulated Data Lake Storage
+│   ├── 1_bronze/                # Raw API responses (Immutable JSON files)
+│   ├── 2_silver/                # Cleaned data (Parquet/CSV, Unpivoted & Typed)
+│   └── 3_gold/                  # Final Fact/Dimension tables for Analysis
+├── config/                      # Airflow configuration and environment files
+├── plugins/                     # Custom Airflow operators or sensors
+├── logs/                        # Task execution logs (Auto-generated by Airflow)
+├── Dockerfile                   # Custom image setup to include specific libraries
+├── docker-compose.yaml          # Multi-container orchestration (Airflow, Postgres, Redis)
+├── requirements.txt             # Python dependencies (Pandas, Requests, etc.)
+└── .gitignore                   # Files to exclude from Git (logs, local datalake, .env)
+```
+
+## ⚙️ Data Pipeline & Medallion Layers
+This project utilizes the **Medallion Architecture** to manage data quality as it flows through the pipeline:
+
+### 🥉 Bronze Layer (Raw Zone)
+* **Status:** Immutable.
+* **Process:** Data is ingested directly from the EIA API v2 and stored in its original JSON format. 
+* **Goal:** To maintain a permanent record of the source data for auditing and re-processing.
+
+### 🥈 Silver Layer (Processed Zone)
+* **Status:** Cleaned, Filtered, and Structured.
+* **Process:** * Parsing JSON into tabular formats.
+    * Type conversion (Dates, Numerics).
+    * **Unpivoting:** Converting Wide-format data (Area-based columns) into Long-format for relational modeling.
+    * **Resampling:** Aggregating Weekly data into Monthly averages to ensure compatibility with logistics movement metrics.
+
+### 🥇 Gold Layer (Curated Zone)
+* **Status:** Business-ready (Analytical).
+* **Process:** * Joining Price, Supply, and Movement datasets into a unified **Star Schema**.
+    * Calculating Key Performance Indicators (KPIs) such as Price-to-Inventory correlation.
+* **Goal:** Providing a single source of truth for BI tools and executive dashboards.
+
+## 🚀 Setup & Installation (Airflow on Docker)
+
+This project runs on **Apache Airflow 3.2.0** using **Docker Compose**. The setup is configured to ensure that the Airflow containers can access the local `datalake` and `dags/scripts` directories.
+
+### 1. Prerequisites
+* **Docker Desktop:** Allocate at least 4GB of RAM (8GB recommended).
+* **Docker Compose:** v2.14.0 or newer.
+
+### 2. Project Initialization
+Prepare the environment by creating necessary directories and setting up the environment variables:
+```bash
+# Create local directories
+mkdir -p ./dags ./logs ./plugins ./config ./datalake
+
+# Set the correct Airflow User ID (Linux/macOS)
+echo -e "AIRFLOW_UID=$(id -u)" > .env
+```
+
+### 3. Fetching and Configuring docker-compose.yaml
+Download the official Airflow Docker Compose file:
+```bash
+curl -LfO '[https://airflow.apache.org/docs/apache-airflow/3.2.0/docker-compose.yaml](https://airflow.apache.org/docs/apache-airflow/3.2.0/docker-compose.yaml)'
+```
+
+### 4. Configuring Docker Volumes & Path Mapping
+By default, the official Airflow `docker-compose.yaml` is not aware of our custom `datalake` directory. To ensure the pipeline can read/write data, you **must** modify the `volumes` section.
+
+Open `docker-compose.yaml` and locate the `x-airflow-common:` section. Under its `volumes:` definition, add the mapping for the datalake:
+
+```yaml
+# Inside docker-compose.yaml under x-airflow-common -> volumes
+volumes:
+  - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+  - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+  - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+  - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+  - ${AIRFLOW_PROJ_DIR:-.}/datalake:/opt/airflow/datalake  # <--- CRITICAL: ADD THIS LINE
+```
+
+### 5. Customizing the Airflow Image (Dependencies)
+Since this project requires specific Python libraries (`pandas`, `requests`, etc.) for data ingestion and transformation, you must build a custom Docker image.
+
+**Step 5.1: Create a `requirements.txt` file**
+Create this file in the root directory of the project and add the necessary libraries:
+```text
+pandas
+requests
+```
+
+**Step 5.2: Create a Dockerfile**
+Create a file named Dockerfile (no file extension) in the root directory with the following content:
+```Dockerfile
+FROM apache/airflow:3.2.0
+ADD requirements.txt .
+RUN pip install -r requirements.txt
+```
+
+**Step 5.3: Modify docker-compose.yaml**
+To tell Docker to use your custom Dockerfile instead of the pre-built image, make the following changes:
+
+1. Find the line:
+```Dockerfile
+image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.2.0}
+```
+Action: Add a # at the beginning to comment it out.
+
+2. Find the line:
+```Dockerfile
+# build: .
+```
+Action: Remove the # to uncomment it.
+
+docker-compose.yaml should look like this:
+```yaml
+# image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.2.0}
+build: .
+```
+
+### 6. Initializing the Database
+Before running Airflow for the first time, you must prepare the environment by running the database migrations and creating the default administrator account.
+
+**Execute the initialization command:**
+```bash
+docker compose up airflow-init
+```
+
+Verification:
+Wait for the process to complete. You should see a log output ending with:
+airflow-init-1 exited with code 0
+
+### 7. Launching the Services
+Once the initialization is successful, you can start all Airflow components (Webserver, Scheduler, Worker, and Triggerer) to run in the background.
+
+**Start the services:**
+```bash
+docker compose up -d
+```
+
+**Check service status:**
+```bash
+docker ps
+```
+
+### 8. Accessing the Web Interface
+Once the containers are running and their status is **healthy**, you can access the Airflow UI to manage and monitor your pipelines.
+
+**Connection Details:**
+* **URL:** [http://localhost:8080](http://localhost:8080)
+* **Username:** `airflow`
+* **Password:** `airflow`
+
+---
+
+### 9. Stopping and Cleaning Up the Environment
+You can manage the state of your Airflow environment using the following commands:
+
+**To stop the services (Keeps your data and metadata):**
+Use this when you want to pause your work but keep the database and downloaded data intact.
+```bash
+docker compose stop
+```
+
+**To remove the environment (Complete Reset):**
+Warning: This command will delete all containers, volumes (including the Airflow metadata database), and the custom image.
+
+```bash
+docker compose down --volumes --rmi all
+```
