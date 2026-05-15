@@ -1,12 +1,17 @@
+import sys
 import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, explode, to_date
 
+# Add the current directory to the system path to import the helper function
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from dq_helpers import apply_quarantine
+
 def process_supply_data():
     """
     Performs data cleansing and transformation for the Supply dataset.
-    Implements advanced Data Quality (DQ) handling to ensure pipeline resilience 
-    against anomalous negative values while preserving historical integrity.
+    Filters for 'Ending Stocks' and implements a Quarantine Zone 
+    for negative values to ensure data observability and auditability.
     """
     spark = SparkSession.builder \
         .appName("Clean_Supply_Estimates") \
@@ -17,7 +22,6 @@ def process_supply_data():
         print("[INFO] Starting Silver Layer processing for Supply data")
         
         # 1. Ingest Bronze Data
-        # Using multiline option for nested EIA API JSON structure
         raw_df = spark.read.option("multiline", "true").json("/opt/airflow/datalake/bronze/supply_*.json")
         exploded_df = raw_df.select(explode(col("response.data")).alias("data"))
         
@@ -30,44 +34,43 @@ def process_supply_data():
             col("data.area-name").alias("area")
         )
         
-        # 3. Initial Filtering
-        # Removes null values and targets specific petroleum products
-        silver_df = silver_df.filter(
-            col("volume_k_barrels").isNotNull() &
-            (col("product_name").contains("Crude Oil") | col("product_name").contains("Distillate Fuel Oil"))
+        # 3. Business Logic Filter & Data Quality (DQ) Checks
+        print("[INFO] Running Data Quality Checks")
+        
+        # 3.1 Business Logic: Filter only "Ending Stocks"
+        # We do this before DQ checks because other processes (like Net Imports) 
+        # can legitimately have negative values based on economic principles.
+        silver_df = silver_df.filter(col("process_name") == "Ending Stocks")
+
+        # 3.2 Dataset-level check
+        row_count = silver_df.count()
+        if row_count == 0:
+            raise ValueError("DQ Critical Error: Supply dataframe is empty after filtering Ending Stocks.")
+
+        # 3.3 Row-level check: Ending Stocks must not be negative
+        valid_condition = col("volume_k_barrels") >= 0
+        quarantine_path = "/opt/airflow/datalake/quarantine/supply_estimates"
+        
+        valid_df = apply_quarantine(
+            df=silver_df,
+            valid_condition=valid_condition,
+            error_reason_text="Negative Volume in Ending Stocks",
+            quarantine_path=quarantine_path
         )
 
-        # 4. Data Quality (DQ) Check and Resilience Handling
-        print("[INFO] Executing Data Quality validation")
-        
-        total_count = silver_df.count()
-        if total_count == 0:
-            raise ValueError("DQ Critical Error: Supply dataframe is empty after initial filtering")
+        # Ensure we still have data to process after quarantine
+        if valid_df.count() == 0:
+            raise ValueError("DQ Critical Error: No valid records remaining after quarantine.")
 
-        # Handle negative volumes: Filter out anomalies instead of stopping the pipeline
-        negative_records = silver_df.filter(col("volume_k_barrels") < 0)
-        negative_count = negative_records.count()
-        
-        if negative_count > 0:
-            print(f"[WARN] Data Quality Issue: Detected {negative_count} records with negative volumes.")
-            print("[INFO] Action: Filtering out anomalous negative records to preserve Data Warehouse integrity.")
-            
-            # Retention of strictly positive or zero values
-            silver_df = silver_df.filter(col("volume_k_barrels") >= 0)
-        else:
-            print("[INFO] DQ Check Passed: No negative values detected.")
-
-        # 5. Persistence to Silver Layer (Parquet)
+        # 4. Persistence to Silver Layer
         output_path = "/opt/airflow/datalake/silver/supply_estimates"
-        silver_df.write.mode("overwrite").parquet(output_path)
-        
-        print(f"[INFO] Successfully persisted cleaned supply data to {output_path}")
+        valid_df.write.mode("overwrite").parquet(output_path)
+        print(f"[INFO] Successfully persisted clean supply data to {output_path}")
 
     except Exception as e:
         print(f"[ERROR] Silver Layer pipeline failed: {str(e)}")
         raise e
     finally:
-        # Resource cleanup
         spark.stop()
 
 if __name__ == "__main__":
