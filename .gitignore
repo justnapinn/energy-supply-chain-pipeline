@@ -2,6 +2,7 @@
 .env
 .DS_Store
 Thumbs.db
+venv/
 
 # --- Airflow ---
 logs/

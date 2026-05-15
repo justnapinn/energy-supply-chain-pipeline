@@ -14,10 +14,12 @@ def extract_supply_estimates():
         "api_key": API_KEY,
         "frequency": "weekly",
         "data[0]": "value",
+        "facets[product]": ["EPC0", "EPD2D"], # Crude Oil and Distillate Fuel Oil
+        "facets[area][]": "NUS", # U.S. Total
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "offset": 0,
-        "length": 5000 
+        "length": 104 # 2 years of weekly data (52 weeks * 2 products) 
     }
 
     response = requests.get(url, params=params)

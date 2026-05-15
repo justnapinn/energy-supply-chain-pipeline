@@ -17,7 +17,7 @@ def extract_logistics_movements():
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "offset": 0,
-        "length": 50 
+        "length": 12 # 12 Months
     }
 
     response = requests.get(url, params=params)
