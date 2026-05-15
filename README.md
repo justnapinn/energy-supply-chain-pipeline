@@ -1,5 +1,4 @@
 # Macro-Energy Supply Chain & Logistics Analytics Pipeline
-## Enterprise-Grade Technical Deep-Dive Documentation
 
 ---
 
