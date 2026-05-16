@@ -47,59 +47,66 @@ Upon completion, stakeholders gain access to:
 ### 📊 Medallion Storage & Data Transformation Pipeline
 
 ![Orchestration Topology](photos/full_dag.png)
+*(The overarching orchestration topology demonstrating inter-DAG triggering.)*
+
+#### **Data Flow & Storage Architecture**
+
+![Data Flow & Medallion Architecture](photos/data_flow_architecture.png)
+*(The 1-to-1 data transit pipeline from raw API extraction into curated star schema dimensions and facts, featuring integrated quarantine branching.)*
+
+To fully understand the data lifecycle, the diagram below illustrates the exact physical data flow from individual API endpoints, through the Medallion layers, including the critical **Quarantine Zone** for anomaly isolation, before final delivery into the Serving Layer.
+
+#### **Data Flow & Storage Architecture**
 
 The pipeline implements a **three-tier Medallion Architecture** orchestrated by **Apache Airflow** running in a containerized Docker environment. Data transits through four discrete transformations:
 
 #### **Tier 1: Bronze Layer (Raw Ingestion Zone)**
-**Status:** Immutable, audit-logged  
-**Temporal Frequency:** Weekly (every Monday at 00:00 UTC)
+* **Status:** Immutable, audit-logged
+* **Temporal Frequency:** Weekly (every Monday at 00:00 UTC)
 
-The Bronze layer serves as the **permanent historical archive**. Three independent Python extraction scripts pull JSON data directly from the U.S. EIA API v2:
+The Bronze layer serves as the **permanent historical archive**. Three independent Python extraction scripts pull JSON data directly from the U.S. EIA API v2 into dedicated 1-to-1 storage silos:
 
-- **Petroleum Prices (`extract_prices.py`):** Fetches 52 weeks of weekly diesel retail prices (U.S. No. 2 Diesel, series `EMD_EPD2D_PTE_NUS_DPG`).
-- **Supply Estimates (`extract_supply.py`):** Fetches 104 records spanning 2 years of weekly ending stocks for Crude Oil and Distillate Fuel Oil across all U.S. areas.
-- **Logistics Movements (`extract_logistics_movements.py`):** Fetches 12 months of monthly net import flows for petroleum products.
+* **Petroleum Prices (`extract_prices.py`):** Fetches 52 weeks of weekly diesel retail prices (U.S. No. 2 Diesel, series `EMD_EPD2D_PTE_NUS_DPG`).
+* **Supply Estimates (`extract_supply.py`):** Fetches 104 records spanning 2 years of weekly ending stocks for Crude Oil and Distillate Fuel Oil.
+* **Logistics Movements (`extract_logistics_movements.py`):** Fetches 12 months of monthly net import flows for petroleum products.
 
 Each extraction is stored as an immutable JSON file in `/opt/airflow/datalake/bronze/` with a timestamp-based filename (e.g., `prices_20260516.json`). This creates an **audit-friendly, schema-flexible** landing zone that preserves the original API response structure for future schema evolution or regulatory investigation.
 
-#### **Tier 2: Silver Layer (Data Quality & Structured Zone)**
-**Status:** Cleaned, validated, schema-enforced  
-**Temporal Frequency:** Immediate (triggered by Bronze completion)
+#### **Tier 2: Silver Layer & Quarantine Zone (Data Quality Gate)**
+* **Status:** Cleaned, validated, schema-enforced
+* **Temporal Frequency:** Immediate (triggered by Bronze completion)
 
-The Silver layer is where **data quality becomes enforced as law**. Three PySpark scripts operate in parallel, each reading Bronze JSON data and applying deterministic transformations:
+The Silver layer is where **data quality becomes enforced as law**. Three PySpark scripts operate in parallel, reading their respective Bronze JSON data. The flow diverges based on Data Quality (DQ) validation:
 
-- **Schema Enforcement:** All columns are explicitly cast to correct types (dates → `YYYY-MM-DD`, volumes → `double`, areas → `string`).
-- **Anomaly Routing:** Records that fail validation (e.g., negative inventory volumes) are separated and written to a **Quarantine Zone** with metadata tags (`error_reason`, `quarantined_at`), creating a **dead letter queue** for auditing and debugging.
-- **Deduplication:** Temporal duplicates introduced by the ≤104-record API extraction window are removed via `dropDuplicates()` on natural key composites.
-
-Output is stored as **Parquet files** in `/opt/airflow/datalake/silver/` for efficient columnar compression and predicate pushdown in downstream join operations.
+* **Schema Enforcement & Deduplication:** All columns are explicitly cast to correct types (dates → `YYYY-MM-DD`, volumes → `double`, areas → `string`), and temporal duplicates are removed via `dropDuplicates()` on natural key composites.
+* **The "Pass" Route (Silver Parquet):** Valid records proceed to their dedicated Silver silos as optimized Parquet files (e.g., Bronze Prices -> Silver Prices), ready for columnar compression and downstream predicate pushdown in join operations.
+* **The "Fail" Route (Quarantine Zone):** Records violating physical or economic constraints (e.g., negative diesel prices, or inventory volumes `< 0`) are actively filtered and routed to a **Dead Letter Queue (Quarantine Zone)**. They are appended with metadata tags (`error_reason`, `quarantined_at`). This ensures the pipeline does not fail abruptly, while preserving corrupted records for engineering post-mortems and regulatory audits.
 
 #### **Tier 3: Gold Layer (Analytical Curated Zone)**
-**Status:** Business-ready, dimensional modeled, joined  
-**Temporal Frequency:** Immediate (triggered by Silver completion)
+* **Status:** Business-ready, dimensional modeled, joined
+* **Temporal Frequency:** Immediate (triggered by Silver completion)
 
-The Gold layer is where **analytics value is unlocked**. A single PySpark script (`gold_analytics.py`) orchestrates:
+The Gold layer is where **analytics value is unlocked**. A single PySpark script (`gold_analytics.py`) consolidates the three Silver data streams into a unified Star Schema:
 
-1. **Dimension table generation** by reading distinct product names, areas, and dates from Silver parquet files.
-2. **Surrogate key generation** using deterministic CRC32 hashing (not sequential auto-increments) to ensure reproducibility across parallel PySpark executors.
-3. **Fact table construction** via multi-step inner and left joins:
-   - Inner join on `(year, week)` composite key between weekly prices and weekly inventory to enforce temporal semanticity.
-   - Left join on monthly context (net imports), with forward-fill nulls as `0.0` if no imports occurred.
-4. **Precision normalization** (rounding prices to 3 decimals, imports to 2 decimal places) to match downstream PostgreSQL numeric precision.
+* **Dimension table generation:** Generates dimension tables by reading distinct product names, areas, and dates from Silver parquet files.
+* **Surrogate key generation:** Creates surrogate keys using deterministic CRC32 hashing (not sequential auto-increments) to ensure reproducibility across parallel PySpark executors.
+* **Fact table construction:** Builds the central fact table via multi-step inner and left joins:
+  * **Inner join** on `(year, week)` composite key between weekly prices and weekly inventory to enforce temporal semanticity.
+  * **Left join** on monthly context (net imports), with forward-fill nulls as `0.0` if no imports occurred.
+* **Precision normalization:** Normalizes numeric precision (rounding prices to 3 decimals, imports to 2 decimal places) to match downstream PostgreSQL numeric precision.
 
 Output dimension and fact tables are stored as Parquet files in `/opt/airflow/datalake/gold/` and ready for serving.
 
 #### **Tier 4: Serving Layer (PostgreSQL Warehouse)**
-**Status:** Production-ready, idempotent, 2NF normalized  
-**Temporal Frequency:** Immediate (triggered by Gold completion)
+* **Status:** Production-ready, idempotent, 2NF normalized
+* **Temporal Frequency:** Immediate (triggered by Gold completion)
 
-Two sequential operations execute:
+Two sequential operations execute to load the Gold Parquet files into the warehouse:
 
-**Phase 1: Distributed Staging (Spark JDBC Write)**  
-PySpark reads each Gold Parquet file and writes directly to PostgreSQL using `df.write.jdbc()`. This leverages Spark's native JDBC writer to distribute the write operation across executor processes, achieving parallelized data loading. Tables are written to temporary staging tables (e.g., `fact_diesel_market_staging`) with `mode="overwrite"` to handle re-runs idempotently.
-
-**Phase 2: Atomic Merge (Native PostgreSQL UPSERT)**  
-After all staging tables are populated, native PostgreSQL SQL executes UPSERT operations using `DISTINCT ON` + `ON CONFLICT DO UPDATE` syntax:
+* **Phase 1: Distributed Staging (Spark JDBC Write)**  
+  PySpark reads each Gold Parquet file and writes directly to temporary PostgreSQL staging tables (e.g., `fact_diesel_market_staging`) using `mode="overwrite"`. This leverages Spark's native JDBC writer to distribute the write operation across executor processes, achieving parallelized data loading.
+* **Phase 2: Atomic Merge (Native PostgreSQL UPSERT)**  
+  After all staging tables are populated, native PostgreSQL SQL executes UPSERT operations using `DISTINCT ON` + `ON CONFLICT DO UPDATE` syntax. This ensures absolute **Idempotency** (preventing duplicate records on mid-week pipeline re-runs) and **Atomicity** (all four tables merge within a single transaction, preventing partial warehouse corruption). Temporary staging tables are dropped automatically after a successful merge.
 
 ```sql
 INSERT INTO fact_diesel_market (date, product_id, area_id, ...)
